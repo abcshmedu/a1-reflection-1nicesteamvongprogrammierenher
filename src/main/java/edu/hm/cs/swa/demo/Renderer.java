@@ -21,18 +21,18 @@ public class Renderer {
             InstantiationException,
             IllegalAccessException {
 
-        final StringBuilder renderedObjectBuilder = new StringBuilder();
+        final StringBuilder renderedStringBuilder = new StringBuilder();
 
         final String renderedInstanceName = renderInstanceName(objectToRender);
-        renderedObjectBuilder.append(renderedInstanceName);
+        renderedStringBuilder.append(renderedInstanceName);
 
         final String renderedFields = renderFields(objectToRender);
-        renderedObjectBuilder.append(renderedFields);
+        renderedStringBuilder.append(renderedFields);
 
         final String renderedMethods = renderMethods(objectToRender);
-        renderedObjectBuilder.append(renderedMethods);
+        renderedStringBuilder.append(renderedMethods);
 
-        return renderedObjectBuilder.toString();
+        return renderedStringBuilder.toString();
     }
 
     private String renderInstanceName(Object objectToRender) {
@@ -48,87 +48,91 @@ public class Renderer {
             InvocationTargetException {
 
         final Class classOfObjectToRender = objectToRender.getClass();
-        final Field[] fieldsToRender = classOfObjectToRender.getDeclaredFields();
-        final StringBuilder builder = new StringBuilder();
+        final Field[] declaredFields = classOfObjectToRender.getDeclaredFields();
+        final StringBuilder renderedFieldsBuilder = new StringBuilder();
 
-        for (final Field field : fieldsToRender) {
+        for (final Field field : declaredFields) {
             if (field.isAnnotationPresent(RenderMe.class)) {
-                builder.append(renderField(field));
+                final String renderedField = renderField(field);
+                renderedFieldsBuilder.append(renderedField);
             }
         }
 
-        return builder.toString();
+        return renderedFieldsBuilder.toString();
     }
 
-    private String renderField(Field field) throws ClassNotFoundException,
+    private String renderField(Field field)
+            throws ClassNotFoundException,
             NoSuchMethodException,
             InvocationTargetException,
             InstantiationException,
             IllegalAccessException {
-        final StringBuilder builder = new StringBuilder();
 
         final RenderMe annotation = field.getAnnotation(RenderMe.class);
         final String rendererToUse = annotation.with();
 
-        if (rendererToUse.equals("")) {
-            field.setAccessible(true);
-            builder.append(field.getName());
-            builder.append(" (Type ");
-            if (field.getType().isPrimitive()) {
-                builder.append(field.getType().getSimpleName());
-            } else {
-                builder.append(field.getType().getCanonicalName());
-            }
-            builder.append("): ");
-            builder.append(field.get(objectToRender).toString());
-            builder.append('\n');
-        } else {
-            builder.append(renderViaReflection(rendererToUse, field));
-        }
-
-        return builder.toString();
+        return rendererToUse.equals("") ?
+                useStandardFieldRenderer(field) :
+                useExternalFieldRenderer(rendererToUse, field);
     }
 
-    private String renderMethods(Object objectToRender) {
-        final Class classOfObjectToRender = objectToRender.getClass();
-        final Method[] methods = classOfObjectToRender.getDeclaredMethods();
-
+    private String useStandardFieldRenderer(Field field) throws IllegalAccessException {
         final StringBuilder builder = new StringBuilder();
 
-        for (final Method method : methods) {
-            if (method.isAnnotationPresent(RenderMe.class)) {
-                if (!method.getReturnType().toString().equals("void")) {
-                    builder.append(method.getName());
-                    builder.append(" returns: ");
-
-                    builder.append(method.getReturnType());
-                    builder.append('\n');
-                }
-            }
-        }
+        field.setAccessible(true);
+        builder.append(field.getName());
+        builder.append(" (Type ");
+        builder.append(getTypeOfField(field));
+        builder.append("): ");
+        builder.append(field.get(objectToRender).toString());
+        builder.append('\n');
 
         return builder.toString();
     }
 
-    private String renderViaReflection(final String canonicalName, final Field field)
+    private String getTypeOfField(Field field) {
+        return field.getType().isPrimitive() ?
+                field.getType().getSimpleName() :
+                field.getType().getCanonicalName();
+    }
+
+    private String useExternalFieldRenderer(final String externalRenderer, final Field field)
             throws ClassNotFoundException,
             IllegalAccessException,
             InstantiationException,
             NoSuchMethodException,
             InvocationTargetException {
 
-        final StringBuilder builder = new StringBuilder();
-        final Class renderer = Class.forName(canonicalName);
-        final Object rendererObject = renderer.newInstance();
-        final Class clazz = field.getType();
-        final Class[] parameterArray = new Class[1];
-        parameterArray[0] = clazz;
+        final Class rendererClass = Class.forName(externalRenderer);
+        final Object rendererObject = rendererClass.newInstance();
+        final Class[] parameterArray = {field.getType()};
 
-        builder.append(field.getName());
-        builder.append(' ');
-        builder.append(renderer.getMethod("render", parameterArray)
-                .invoke(rendererObject, field.get(objectToRender)));
+        final Method externalRenderMethod = rendererClass.getMethod("render", parameterArray);
+        final String renderedField = (String) externalRenderMethod.invoke(rendererObject, field.get(objectToRender));
+
+        return field.getName() + ' ' + renderedField;
+    }
+
+    private String renderMethods(Object objectToRender) {
+        final Class classOfObjectToRender = objectToRender.getClass();
+        final Method[] methodsToRender = classOfObjectToRender.getDeclaredMethods();
+
+        final StringBuilder builder = new StringBuilder();
+
+        for (final Method method : methodsToRender) {
+            if (method.isAnnotationPresent(RenderMe.class) & !methodReturnsVoid(method)) {
+                builder.append(renderMethod(method));
+            }
+        }
 
         return builder.toString();
+    }
+
+    private String renderMethod(Method method) {
+        return method.getName() + " returns: " + method.getReturnType() + '\n';
+    }
+
+    private boolean methodReturnsVoid(Method method) {
+        return method.getReturnType().toString().equals("void");
     }
 }
